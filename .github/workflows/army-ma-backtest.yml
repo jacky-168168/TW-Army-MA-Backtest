@@ -38,6 +38,10 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m pytest -q
+      - name: 合成日 K 整合測試（非真實台股績效）
+        run: |
+          python make_demo_data.py
+          python army_ma.py --data demo_data --output results/smoke --first-ma 16 --last-ma 70
 
   sample:
     name: 下載 10 檔真實歷史行情
@@ -63,7 +67,7 @@ jobs:
           name: historic-data-sample
           path: data/*.csv
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 1
 
   full:
     name: 全市場下載分片 ${{ matrix.shard }}
@@ -112,7 +116,7 @@ jobs:
           name: historic-data-${{ matrix.shard }}
           path: data/*.csv
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 1
 
   analyze:
     name: SMA16–70 回測與樣本外驗證
@@ -153,4 +157,4 @@ jobs:
           name: army-ma-backtest-results
           path: results/
           if-no-files-found: warn
-          retention-days: 90
+          retention-days: 30
