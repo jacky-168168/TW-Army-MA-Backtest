@@ -1,0 +1,18 @@
+{
+  "status": "proxy_adjusted_pilot_only",
+  "price_source": "free_reference_event_adjusted_proxy",
+  "cohort_stocks": 130,
+  "events_applied": 1319,
+  "pretest_selected_ma": [
+    50,
+    54,
+    58
+  ],
+  "limitations": [
+    "非隨機挑選的130檔股票",
+    "缺付費減資參考價及完整現金流",
+    "不代表全台股共通軍線已被證明",
+    "樣本外不可重新選參數",
+    "需補歷史下市櫃股票及更大代表性樣本"
+  ]
+}
