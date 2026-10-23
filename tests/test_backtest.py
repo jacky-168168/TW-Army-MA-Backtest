@@ -113,3 +113,28 @@ def test_finmind_free_price_response(monkeypatch):
     data=get_json({"dataset":"TaiwanStockPrice","data_id":"2330","start_date":"2026-01-01"})
     assert data[0]["Trading_money"]==80000000
     assert calls==["TaiwanStockPrice"]
+
+def test_duplicate_split_and_par_value_are_applied_only_once():
+    from proxy_corporate_adjust import clean_events,adjusted_close
+    e=pd.DataFrame([
+        {"stock":"2327","date":"2025-08-25","before":546,"after":136.5,
+         "dataset":"TaiwanStockSplitPrice","priority":1},
+        {"stock":"2327","date":"2025-08-25","before":546,"after":136.5,
+         "dataset":"TaiwanStockParValueChange","priority":2}])
+    events=clean_events(e)
+    assert len(events)==1
+    assert events.factor.iloc[0]==pytest.approx(.25)
+    prices=pd.DataFrame({"date":["2025-08-22","2025-08-25"],
+                         "close":[546.0,136.5]})
+    adjusted,minimum,maximum=adjusted_close(prices,events,"2327")
+    assert adjusted.adj_close.tolist()==pytest.approx([136.5,136.5])
+
+def test_conflicting_same_day_corporate_action_stops_adjustment():
+    from proxy_corporate_adjust import clean_events
+    e=pd.DataFrame([
+        {"stock":"4763","date":"2025-06-30","before":885,"after":88.5,
+         "dataset":"TaiwanStockSplitPrice","priority":1},
+        {"stock":"4763","date":"2025-06-30","before":885,"after":442.5,
+         "dataset":"TaiwanStockDividendResult","priority":3}])
+    with pytest.raises(ValueError,match="不同公司行動調整比率"):
+        clean_events(e)
