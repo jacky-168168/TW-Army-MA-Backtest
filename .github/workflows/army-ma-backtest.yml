@@ -5,12 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "sample 試跑 10 檔；full 分片下載（需要 FINMIND_TOKEN）"
+        description: "sample=10檔；pilot=150檔先導；full=全市場分片（需 Token）"
         type: choice
         required: true
         default: sample
         options:
           - sample
+          - pilot
           - full
       exit_mode:
         description: "original 僅真跌破出場；full 也加入假突破賣出"
@@ -70,6 +71,51 @@ jobs:
             data/*.json
           if-no-files-found: warn
           retention-days: 1
+
+  pilot:
+    name: 150 檔先導樣本實測（不公開原始行情）
+    needs: tests
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'pilot') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[pilot-run]')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 下載 150 檔免費真實日 K（未還原）
+        run: |
+          STOCKS=$(grep -v "^#" pilot_stocks.txt | xargs)
+          python finmind_download.py --dataset TaiwanStockPrice --stocks $STOCKS --out data --start 2017-01-01 --end 2026-10-22 --min-success-rate 0.85 --sleep 3
+      - name: SMA16–70 批次先導回測
+        run: python army_ma.py --data data --output results --first-ma 16 --last-ma 70 --exit-mode "${{ inputs.exit_mode || 'original' }}"
+      - name: 印出研究資料完整度
+        run: |
+          python - <<'PY'
+          import json, pandas as pd
+          from pathlib import Path
+          m=json.loads(Path('results/run_metadata.json').read_text(encoding='utf-8'))
+          d=json.loads(Path('data/data_source_shard_0.json').read_text(encoding='utf-8'))
+          print('下載成功:',d['downloaded_count'],'資料未調整:',not d['adjusted'])
+          print('有效股票:',m['valid_stocks'],'預選參數:',m['selected_using_train_and_validation_only'])
+          print('先導研究／非全台股隨機樣本／除權息未還原，數字不適合直接用於投資決策。')
+          print(pd.read_csv('results/ma_summary_all.csv').query('period == "validation"').sort_values('coverage_pct',ascending=False).head(10).to_string(index=False))
+          PY
+      - name: 上傳衍生統計報表（不包含原始日K）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: army-ma-pilot-results
+          path: |
+            results/
+            data/data_source_shard_0.json
+            data/download_errors.csv
+          if-no-files-found: warn
+          retention-days: 30
 
   full:
     name: 全市場下載分片 ${{ matrix.shard }}
