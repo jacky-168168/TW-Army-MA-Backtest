@@ -81,3 +81,35 @@ def test_small_universe_does_not_claim_best_ma():
                      "stocks_pass":4,"trades":20,"stocks_eligible":8}
          for ma in [16,17] for period in ["train","validation","test"]])
     assert select_ma(a).empty
+
+def test_finmind_400_does_not_retry(monkeypatch):
+    from finmind_download import get_json
+    import requests
+    calls=[]
+    def fake_get(*args,**kwargs):
+        calls.append(1)
+        response=requests.Response()
+        response.status_code=400
+        response._content=b'{"status":400,"msg":"Your level is free. Please update your user level."}'
+        response.url="https://api.finmindtrade.com/api/v4/data"
+        return response
+    monkeypatch.setattr(requests,"get",fake_get)
+    with pytest.raises(ValueError,match="HTTP 400"):
+        get_json({"dataset":"TaiwanStockPriceAdj","data_id":"2330","start_date":"2020-01-01"})
+    assert len(calls)==1
+
+def test_finmind_free_price_response(monkeypatch):
+    from finmind_download import get_json
+    import requests
+    calls=[]
+    def fake_get(*args,**kwargs):
+        calls.append(kwargs["params"]["dataset"])
+        response=requests.Response()
+        response.status_code=200
+        response._content=b'{"status":200,"data":[{"date":"2026-01-02","open":100,"max":101,"min":99,"close":100,"Trading_money":80000000}]}'
+        response.url="https://api.finmindtrade.com/api/v4/data"
+        return response
+    monkeypatch.setattr(requests,"get",fake_get)
+    data=get_json({"dataset":"TaiwanStockPrice","data_id":"2330","start_date":"2026-01-01"})
+    assert data[0]["Trading_money"]==80000000
+    assert calls==["TaiwanStockPrice"]
