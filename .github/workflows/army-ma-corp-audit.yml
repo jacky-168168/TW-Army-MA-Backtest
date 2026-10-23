@@ -1,0 +1,35 @@
+name: 軍線公司行動資料審核
+on:
+  push:
+    paths:
+      - check_corporate_actions.py
+      - .github/workflows/army-ma-corp-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check-corporate-events:
+    name: 用免費公司行動資料比對極端交易
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 讀取現有極端交易清單
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 39917880730 --repo "$GITHUB_REPOSITORY" --name army-ma-robustness-audit --dir prior-audit
+      - name: 比對除權息、股票分割、減資、面額變更參考事件
+        run: python check_corporate_actions.py --extremes prior-audit/extreme_trades_for_review.csv --output action-audit --limit-stocks 30 --sleep 3
+      - name: 上傳公司行動審查報告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: army-ma-corporate-action-audit
+          path: action-audit/
+          retention-days: 30
