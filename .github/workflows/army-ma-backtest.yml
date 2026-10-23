@@ -1,0 +1,154 @@
+name: 台股共通軍線批次回測
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sample 試跑 10 檔；full 分片下載（需要 FINMIND_TOKEN）"
+        type: choice
+        required: true
+        default: sample
+        options:
+          - sample
+          - full
+      exit_mode:
+        description: "original 僅真跌破出場；full 也加入假突破賣出"
+        type: choice
+        required: true
+        default: original
+        options:
+          - original
+          - full
+permissions:
+  contents: read
+concurrency:
+  group: army-ma-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    name: Python 單元測試
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+
+  sample:
+    name: 下載 10 檔真實歷史行情
+    needs: tests
+    if: ${{ inputs.mode == 'sample' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 下載樣本股票
+        run: python finmind_download.py --stocks 2317 2330 2454 2303 2603 2881 2345 3037 3661 3533 --out data --start 2017-01-01 --end 2026-10-22 --sleep 15
+      - name: 保留測試行情
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historic-data-sample
+          path: data/*.csv
+          if-no-files-found: warn
+          retention-days: 30
+
+  full:
+    name: 全市場下載分片 ${{ matrix.shard }}
+    needs: tests
+    if: ${{ inputs.mode == 'full' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 檢查 API Token
+        run: |
+          if [ -z "$FINMIND_TOKEN" ]; then
+            echo '請先在 GitHub Settings > Secrets and variables > Actions 設定 FINMIND_TOKEN。' >&2
+            exit 1
+          fi
+      - name: 取回已下載快取
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: army-shard-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: |
+            army-shard-${{ matrix.shard }}-
+      - name: 下載歷史日 K
+        run: python finmind_download.py --out data --start 2017-01-01 --end 2026-10-22 --sleep 30 --shard-index ${{ matrix.shard }} --shard-count 4
+      - name: 保存下次續跑快取
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: army-shard-${{ matrix.shard }}-${{ github.run_id }}
+      - name: 保留下載分片
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historic-data-${{ matrix.shard }}
+          path: data/*.csv
+          if-no-files-found: warn
+          retention-days: 30
+
+  analyze:
+    name: SMA16–70 回測與樣本外驗證
+    needs: [tests, sample, full]
+    if: ${{ always() && needs.tests.result == 'success' && (needs.sample.result == 'success' || needs.full.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 合併下載分片
+        uses: actions/download-artifact@v4
+        with:
+          pattern: historic-data-*
+          merge-multiple: true
+          path: data
+      - name: 執行回測
+        run: python army_ma.py --data data --output results --first-ma 16 --last-ma 70 --exit-mode '${{ inputs.exit_mode }}'
+      - name: 資料覆蓋率摘要
+        run: |
+          python - <<'PY'
+          import json,pandas as pd
+          m=json.load(open('results/run_metadata.json',encoding='utf-8'))
+          s=pd.read_csv('results/ma_summary_all.csv')
+          print('有效股票數:',m['valid_stocks'])
+          print('研究狀態:',m['research_status'])
+          print('訓練驗證預選:',m['selected_using_train_and_validation_only'])
+          print(s.loc[s.period=='test',['ma','stocks_eligible','trades','coverage_pct']].head().to_string(index=False))
+          PY
+      - name: 保存回測報表
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: army-ma-backtest-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 90
