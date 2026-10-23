@@ -87,7 +87,7 @@ def main():
             print(f"進度 {j}/{len(ids)}，新檔 {done}，快取 {skip}",flush=True)
         time.sleep(max(0,args.sleep))
     import json
-    (args.out/"data_source.json").write_text(json.dumps({"dataset":args.dataset,"adjusted":args.dataset=="TaiwanStockPriceAdj","start":args.start,"end":args.end,"requested_count":len(ids),"downloaded_count":done,"cached_count":skip,"failed_count":len(fail),"warning":"原始價格未還原除權息；拆股等公司行動可能扭曲訊號與報酬，請勿直接據此宣稱最佳軍線"},ensure_ascii=False,indent=2),encoding="utf-8")
+    (args.out/f"data_source_shard_{args.shard_index}.json").write_text(json.dumps({"dataset":args.dataset,"adjusted":args.dataset=="TaiwanStockPriceAdj","start":args.start,"end":args.end,"requested_count":len(ids),"downloaded_count":done,"cached_count":skip,"failed_count":len(fail),"warning":"原始價格未還原除權息；拆股等公司行動可能扭曲訊號與報酬，請勿直接據此宣稱最佳軍線"},ensure_ascii=False,indent=2),encoding="utf-8")
     if fail: pd.DataFrame(fail).to_csv(args.out/"download_errors.csv",index=False,encoding="utf-8-sig")
     print(f"完成：新檔 {done}，已有 {skip}，失敗 {len(fail)}")
     if fail: raise SystemExit(f"{len(fail)} 檔失敗，請檢查 download_errors.csv，續跑可保留已下載快取")
