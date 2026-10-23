@@ -47,11 +47,13 @@ def main():
     p.add_argument("--stocks",nargs="*",help="指定代號，省略則取市場股票清單")
     p.add_argument("--sleep",type=float,default=15.0)
     p.add_argument("--dataset",choices=["TaiwanStockPrice","TaiwanStockPriceAdj"],default="TaiwanStockPrice",help="預設免費原始價格；還原股價需要對應會員權限")
+    p.add_argument("--min-success-rate",type=float,default=1.0,help="需要成功取得資料的最低比例，預設所有指定股票都成功")
     p.add_argument("--refresh",action="store_true")
     p.add_argument("--shard-index",type=int,default=0)
     p.add_argument("--shard-count",type=int,default=1)
     args=p.parse_args()
     args.out.mkdir(parents=True,exist_ok=True)
+    if not 0.0<args.min_success_rate<=1.0: p.error("--min-success-rate 應介於 0 與 1")
     if args.shard_count<1 or not 0<=args.shard_index<args.shard_count:
         p.error("分片參數錯誤：0 <= shard-index < shard-count")
     token=os.environ.get("FINMIND_TOKEN")
@@ -90,7 +92,9 @@ def main():
     (args.out/f"data_source_shard_{args.shard_index}.json").write_text(json.dumps({"dataset":args.dataset,"adjusted":args.dataset=="TaiwanStockPriceAdj","start":args.start,"end":args.end,"requested_count":len(ids),"downloaded_count":done,"cached_count":skip,"failed_count":len(fail),"warning":"原始價格未還原除權息；拆股等公司行動可能扭曲訊號與報酬，請勿直接據此宣稱最佳軍線"},ensure_ascii=False,indent=2),encoding="utf-8")
     if fail: pd.DataFrame(fail).to_csv(args.out/"download_errors.csv",index=False,encoding="utf-8-sig")
     print(f"完成：新檔 {done}，已有 {skip}，失敗 {len(fail)}")
-    if fail: raise SystemExit(f"{len(fail)} 檔失敗，請檢查 download_errors.csv，續跑可保留已下載快取")
+    success_rate=(done+skip)/len(ids) if ids else 0.0
+    print(f"股票請求完成率 {success_rate:.1%}，門檻 {args.min_success_rate:.1%}",flush=True)
+    if success_rate<args.min_success_rate: raise SystemExit(f"股票資料不足（成功率 {success_rate:.1%}）：請檢查 download_errors.csv；續跑可保留已下載快取")
 
 if __name__=="__main__":
     main()
