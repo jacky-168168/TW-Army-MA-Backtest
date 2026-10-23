@@ -93,6 +93,8 @@ jobs:
           python finmind_download.py --dataset TaiwanStockPrice --stocks $STOCKS --out data --start 2017-01-01 --end 2026-10-22 --min-success-rate 0.85 --sleep 3
       - name: SMA16–70 批次先導回測
         run: python army_ma.py --data data --output results --first-ma 16 --last-ma 70 --exit-mode "${{ inputs.exit_mode || 'original' }}"
+      - name: 軍線二日反應獨立事件研究（5／10 日，非停損交易績效）
+        run: python event_study.py --data data --output event-study --first-ma 16 --last-ma 70
       - name: 印出研究資料完整度
         run: |
           python - <<'PY'
@@ -112,6 +114,7 @@ jobs:
           name: army-ma-pilot-results
           path: |
             results/
+            event-study/
             data/data_source_shard_0.json
             data/download_errors.csv
           if-no-files-found: warn
