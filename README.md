@@ -7,9 +7,9 @@
 ## 執行
 
 1. GitHub → Actions → **台股共通軍線批次回測** → Run workflow。
-2. 選擇 `sample` 下載 10 檔真實股票（不需 FinMind Token），驗證資料與回測是否正常。
-3. 準備全市場研究時，在 Settings → Secrets and variables → Actions 新增 `FINMIND_TOKEN`，然後選 `full`。
-4. 從該次 Actions 的 Artifacts 下載 `army-ma-backtest-results`，包含完整 SMA 報表、逐筆交易及樣本外結果。
+2. 選擇 `sample` 下載 10 檔真實股票（使用免費 `TaiwanStockPrice`、未還原除權息），驗證資料與回測流程是否正常。
+3. 準備全市場研究時，在 Settings → Secrets and variables → Actions 新增 `FINMIND_TOKEN`，然後選 `full`（免費註冊 Token 可提高請求上限，但**不會解鎖付費的還原價格**）。
+4. 從該次 Actions 的 Artifacts 下載 `army-ma-backtest-results`，包含完整 SMA 報表、逐筆交易及樣本外結果；樣本數不足時不會硬選最佳參數。
 
 也可在本機執行：
 ```bash
@@ -18,6 +18,12 @@ python -m pytest -q
 python finmind_download.py --stocks 2317 2330 2454 --out data --start 2017-01-01
 python army_ma.py --data data --output results
 ```
+
+## ⚠️ 價格調整與研究限制
+
+- 2026-10-23 修正：先前嘗試的 `TaiwanStockPriceAdj` 需要較高會員權限，免費存取會回 HTTP 400；目前改使用免費 `TaiwanStockPrice`。HTTP 400 不再浪費時間重試。
+- 原始日 K **尚未還原除權息、分割、減資**，遇到公司行動可能發出錯誤軍線突破與停損，產生不可靠的績效。本版的實際行情試跑只是**資料／運算管線驗證**，不是可用於投資的最終均線結論。
+- 未來正式研究須納入公司行動調整、歷史下市櫃股票、時間點一致的股票池與成交可行性，並進行樣本外比較。不能把原始價格結果當作「全台股最通用均線」。
 
 ## 研究條件
 
