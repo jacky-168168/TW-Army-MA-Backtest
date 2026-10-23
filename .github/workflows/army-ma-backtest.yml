@@ -1,5 +1,7 @@
 name: 台股共通軍線批次回測
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
