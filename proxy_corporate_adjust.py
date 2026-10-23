@@ -83,11 +83,19 @@ def run(input_dir:Path,output_dir:Path,ids:list[str],start:str,end:str,sleep_s:f
             frame=pd.read_csv(src)
             if "adj_close" in frame.columns: raise ValueError("輸入已含 adj_close，禁止重複還原")
             after,minimum,maximum=adjusted_close(frame,events,symbol)
-            if after["adj_close"].isna().any() or (after["adj_close"]<=0).any():
-                raise ValueError("調整價含無效值")
+            # FinMind 原始資料可能含停牌／缺報價造成的 0 價。回測讀檔也會排除，
+            # 這裡一致地只保留所有 OHLC 有效的交易日，不得插值或偽造成交。
+            price_cols=[c for c in ("open","max","min","close") if c in after]
+            valid=pd.Series(True,index=after.index)
+            for name in price_cols:
+                valid &= pd.to_numeric(after[name],errors="coerce").gt(0)
+            valid &= pd.to_numeric(after["adj_close"],errors="coerce").gt(0)
+            rejected=int((~valid).sum())
+            after=after.loc[valid].copy()
+            if len(after)<130: raise ValueError(f"剩餘有效日K只有 {len(after)}，不足以回測")
             after.to_csv(output_dir/f"{symbol}.csv",index=False,encoding="utf-8-sig")
             report.append({"stock":symbol,"status":"adjusted_proxy","events":len(events[events.stock==symbol]),
-                           "min_factor":minimum,"max_factor":maximum})
+                           "min_factor":minimum,"max_factor":maximum,"invalid_raw_bars_dropped":rejected})
             ok+=1
         except Exception as exc:
             errors.append({"dataset":"price_adjustment","stock":symbol,"error":str(exc)})
