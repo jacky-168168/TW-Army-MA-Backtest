@@ -1,0 +1,92 @@
+name: 軍線130檔代理還原自動研究
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 19 * * *'
+permissions:
+  contents: write
+concurrency:
+  group: army-proxy-130
+  cancel-in-progress: false
+jobs:
+  corrected-cohort:
+    name: 130檔免費資料代理還原與完整參數回測
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: 檢查代理還原研究是否已成功歸檔
+        id: prior
+        shell: bash
+        run: |
+          if [ -f research/proxy130-complete.json ]; then
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            echo '130檔代理還原研究已有成功歸檔，避免重複下載或耗用API額度'
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.prior.outputs.skip != 'true'
+        with:
+          python-version: '3.11'
+          cache: pip
+      - if: steps.prior.outputs.skip != 'true'
+        run: python -m pip install -r requirements.txt
+      - name: 自動下載130檔真實原始日K
+        if: steps.prior.outputs.skip != 'true'
+        run: |
+          STOCKS=$(grep -v '^#' pilot_stocks.txt | head -130 | xargs)
+          python finmind_download.py --dataset TaiwanStockPrice --stocks $STOCKS --out data --start 2017-01-01 --end 2026-10-22 --sleep 4
+      - name: 下載免費除權息及拆併股事件，建立代理還原價
+        if: steps.prior.outputs.skip != 'true'
+        run: |
+          STOCKS=$(grep -v '^#' pilot_stocks.txt | head -130 | xargs)
+          python proxy_corporate_adjust.py --data data --out proxy_adjusted_data --stocks $STOCKS --start 2017-01-01 --end 2026-10-22 --sleep 4
+      - name: 代理還原價SMA16–70與次日成交回測
+        if: steps.prior.outputs.skip != 'true'
+        run: python army_ma.py --data proxy_adjusted_data --output results/proxy_130 --first-ma 16 --last-ma 70
+      - name: 代理還原價二日法則5／10日方向反應
+        if: steps.prior.outputs.skip != 'true'
+        run: python event_study.py --data proxy_adjusted_data --output results/events_proxy_130 --first-ma 16 --last-ma 70
+      - name: 跨股票穩健性審查
+        if: steps.prior.outputs.skip != 'true'
+        run: python robustness_audit.py --trades results/proxy_130/trades_all.csv --output results/robustness_proxy_130 --source '免費公司行動比率代理還原價格（非官方付費還原K）'
+      - name: 驗證資料覆蓋與準備報告
+        if: steps.prior.outputs.skip != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('results/proxy_130/run_metadata.json').read_text(encoding='utf-8'))
+          adj=json.loads(Path('proxy_adjusted_data/adjustment_manifest.json').read_text(encoding='utf-8'))
+          if m['valid_stocks']<125 or adj['adjusted']<125:
+              raise SystemExit('資料覆蓋不足125檔，不能標示成功')
+          out={'status':'proxy_adjusted_pilot_only','price_source':'free_reference_event_adjusted_proxy',
+            'cohort_stocks':m['valid_stocks'],'events_applied':adj['action_events'],
+            'pretest_selected_ma':m['selected_using_train_and_validation_only'],
+            'limitations':['非隨機挑選的130檔股票','缺付費減資參考價及完整現金流','不代表全台股共通軍線已被證明',
+              '樣本外不可重新選參數','需補歷史下市櫃股票及更大代表性樣本']}
+          Path('results/proxy130-complete.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(out,ensure_ascii=False),flush=True)
+          PY
+      - name: 保存衍生報表及資料完整度（不公開原始日K）
+        if: always() && steps.prior.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: army-ma-proxy-130-report
+          path: |
+            results/
+            proxy_adjusted_data/adjustment_coverage.csv
+            proxy_adjusted_data/adjustment_errors.csv
+            proxy_adjusted_data/adjustment_manifest.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: 歸檔成功標記以避免往後重複重跑
+        if: success() && steps.prior.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILE=$(base64 -w 0 results/proxy130-complete.json)
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/research/proxy130-complete.json" \
+            -f message="Record verified 130-stock proxy backtest status [skip ci]" \
+            -f content="$FILE"
