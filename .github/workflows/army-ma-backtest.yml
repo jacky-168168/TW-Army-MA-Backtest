@@ -46,7 +46,7 @@ jobs:
   sample:
     name: 下載 10 檔真實歷史行情
     needs: tests
-    if: ${{ inputs.mode == 'sample' }}
+    if: ${{ inputs.mode == 'sample' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[sample-run]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -58,14 +58,16 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install -r requirements.txt
-      - name: 下載樣本股票
-        run: python finmind_download.py --stocks 2317 2330 2454 2303 2603 2881 2345 3037 3661 3533 --out data --start 2017-01-01 --end 2026-10-22 --sleep 15
+      - name: 下載樣本股票（FinMind 免費原始日K）
+        run: python finmind_download.py --dataset TaiwanStockPrice --stocks 2317 2330 2454 2303 2603 2881 2345 3037 3661 3533 --out data --start 2017-01-01 --end 2026-10-22 --sleep 15
       - name: 保留測試行情
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: historic-data-sample
-          path: data/*.csv
+          path: |
+            data/*.csv
+            data/*.json
           if-no-files-found: warn
           retention-days: 1
 
@@ -102,7 +104,7 @@ jobs:
           restore-keys: |
             army-shard-${{ matrix.shard }}-
       - name: 下載歷史日 K
-        run: python finmind_download.py --out data --start 2017-01-01 --end 2026-10-22 --sleep 30 --shard-index ${{ matrix.shard }} --shard-count 4
+        run: python finmind_download.py --dataset TaiwanStockPrice --out data --start 2017-01-01 --end 2026-10-22 --sleep 30 --shard-index ${{ matrix.shard }} --shard-count 4
       - name: 保存下次續跑快取
         if: always()
         uses: actions/cache/save@v4
@@ -138,13 +140,17 @@ jobs:
           merge-multiple: true
           path: data
       - name: 執行回測
-        run: python army_ma.py --data data --output results --first-ma 16 --last-ma 70 --exit-mode '${{ inputs.exit_mode }}'
+        run: python army_ma.py --data data --output results --first-ma 16 --last-ma 70 --exit-mode '${{ inputs.exit_mode || 'original' }}'
       - name: 資料覆蓋率摘要
         run: |
           python - <<'PY'
           import json,pandas as pd
           m=json.load(open('results/run_metadata.json',encoding='utf-8'))
           s=pd.read_csv('results/ma_summary_all.csv')
+          from pathlib import Path
+          sources=list(Path('data').glob('data_source*.json'))
+          print('使用原始日 K：未還原除權息，僅供回測引擎驗證')
+          print('資料來源紀錄:',len(sources))
           print('有效股票數:',m['valid_stocks'])
           print('研究狀態:',m['research_status'])
           print('訓練驗證預選:',m['selected_using_train_and_validation_only'])
