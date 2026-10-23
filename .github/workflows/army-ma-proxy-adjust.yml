@@ -1,0 +1,58 @@
+name: 軍線公司行動代理還原試跑
+on:
+  push:
+    paths:
+      - proxy_corporate_adjust.py
+      - .github/workflows/army-ma-proxy-adjust.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-proxy-adjustment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: 12 檔真實股票含面額變更壓力測試
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 下載 12 檔歷史日K
+        run: python finmind_download.py --stocks 2327 4763 2344 2330 2317 3037 3105 3189 2383 3450 2492 2603 --out data --start 2017-01-01 --end 2026-10-22 --sleep 4
+      - name: 免費公司行動交叉核對與代理還原
+        run: python proxy_corporate_adjust.py --data data --out proxy_adjusted_data --stocks 2327 4763 2344 2330 2317 3037 3105 3189 2383 3450 2492 2603 --start 2017-01-01 --end 2026-10-22 --sleep 4
+      - name: 原始日K和代理還原價分別回測
+        run: |
+          python army_ma.py --data data --output results/raw --first-ma 16 --last-ma 70
+          python army_ma.py --data proxy_adjusted_data --output results/proxy --first-ma 16 --last-ma 70
+      - name: 檢查分割損失與回測一致性
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          e=pd.read_csv('proxy_adjusted_data/applied_corporate_events.csv')
+          for stock,target in [('4763',0.1),('2327',0.25)]:
+              a=e[(e.stock.astype(str)==stock)&(abs(e.factor-target)<.00001)]
+              if a.empty: raise RuntimeError(f'{stock} 缺少關鍵分割／變更面額參考事件')
+          before=pd.read_csv('results/raw/trades_all.csv')
+          after=pd.read_csv('results/proxy/trades_all.csv')
+          for stock in [4763,2327]:
+              for title,df in [('raw',before),('proxy',after)]:
+                  x=df[(df.stock==stock)&(df.period=='test')]
+                  print(stock,title,'筆數',len(x),'最差交易%',round(x.return_pct.min(),2),'最大交易%',round(x.return_pct.max(),2))
+          print('僅為初步代理還原：尚未包含付費減資參考價及完整實際現金流')
+          PY
+      - name: 上傳完整衍生檢驗報表
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: army-ma-proxy-adjustment-test
+          path: |
+            results/
+            proxy_adjusted_data/adjustment_coverage.csv
+            proxy_adjusted_data/adjustment_errors.csv
+            proxy_adjusted_data/adjustment_manifest.json
+            proxy_adjusted_data/applied_corporate_events.csv
+          retention-days: 30
