@@ -1,5 +1,8 @@
 name: 軍線130檔代理還原自動研究
 on:
+  push:
+    paths:
+      - .github/workflows/army-ma-proxy-130.yml
   workflow_dispatch:
   schedule:
     - cron: '17 19 * * *'
